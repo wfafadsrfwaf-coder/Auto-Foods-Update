@@ -1,5 +1,4 @@
-task.wait(8) 
-
+task.wait(9)
 local Players = game:GetService("Players")
 local TeleportService = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -171,12 +170,37 @@ task.spawn(function()
         print("✅ เริ่มต้นในโลกฟาร์ม - พร้อมฟาร์ม")
     end
     
+
+
+
     -- วนลูปเช็คทุก 30 วินาที
     while true do
         task.wait(30)
         checkAndHandlePlayers()
     end
 end)
+
+-- 🧭 ฟังก์ชันลอยตัวสุ่มทั่วแมพประมาณ 5 วินาที
+local function preloadMapByFloating()
+    local root = Character:WaitForChild("HumanoidRootPart")
+    local startTime = tick()
+
+    print("🧭 เริ่มลอยตัวสุ่มเพื่อโหลดแมพ...")
+
+    while tick() - startTime < 5 do
+        local randomOffset = Vector3.new(
+            math.random(-50, 50),
+            math.random(15, 30),  -- ลอยสูง
+            math.random(-50, 50)
+        )
+        local newPos = root.Position + randomOffset
+        root.CFrame = CFrame.new(newPos)
+        task.wait(0.2)  -- ลอยทุก 0.2 วิ
+    end
+
+    print("✅ โหลดแมพครบแล้ว → เริ่มวาร์ป/ฟาร์มได้")
+end
+
 
 -- ✅ วาร์ปไป FARM_WORLD_ID อัตโนมัติ
 task.spawn(function()
@@ -186,6 +210,10 @@ task.spawn(function()
     -- ถ้าไม่อยู่ในโลกฟาร์ม ให้วาร์ปไป
     if game.PlaceId ~= FARM_WORLD_ID and not table.find(OTHER_WORLDS, game.PlaceId) then
         print("🛫 วาร์ปไปโลกฟาร์ม...")
+
+    -- 🧭 รอแมพโหลดแบบลอย
+        preloadMapByFloating()
+
         local args = { FARM_WORLD_ID, {} }
         remoteTeleport:InvokeServer(unpack(args))
     else
@@ -469,6 +497,27 @@ local function createModernUI()
     end)
 end
 
+
+-- ⚠️ Warning Label (ไม่พบต้นไม้ให้ฟาร์ม)
+local warningLabel = Instance.new("TextLabel", screenGui)
+warningLabel.Size = UDim2.new(0, 400, 0, 50)
+warningLabel.Position = UDim2.new(0.5, -200, 0.5, -25)
+warningLabel.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+warningLabel.TextColor3 = Color3.new(1, 1, 1)
+warningLabel.TextStrokeTransparency = 0.5
+warningLabel.BackgroundTransparency = 0.2
+warningLabel.Font = Enum.Font.GothamBlack
+warningLabel.TextSize = 20
+warningLabel.Text = "❗ ไม่พบต้นไม้ให้ฟาร์มในแมพนี้"
+warningLabel.Visible = false
+
+local corner = Instance.new("UICorner", warningLabel)
+corner.CornerRadius = UDim.new(0, 10)
+
+_G.NoTreeWarningLabel = warningLabel
+
+
+
 -- ✅ ตรวจสอบและขาย
 local function sellEverythingInInventory()
     local res = LocalPlayer:FindFirstChild("Data") and LocalPlayer.Data:FindFirstChild("Resources")
@@ -661,19 +710,19 @@ local function attackTarget(part)
     local root = Character:FindFirstChild("HumanoidRootPart")
     local offset = MAX_UNDERGROUND_OFFSET
 
-    -- วาร์ปเข้าใกล้ต้นไม้
+    -- วาร์ปเข้าใกล้ต้นไม้ถ้าไกลเกิน
     if distanceXZ(root.Position, part.Position) > HORIZONTAL_DISTANCE_THRESHOLD then
         teleportTo(part, TELEPORT_NEAR_TREE_OFFSET)
-        task.wait(0.05) -- เร็วขึ้น
+        task.wait(0.05)
     end
 
     local success = false
     while offset >= MIN_UNDERGROUND_OFFSET do
         teleportTo(part, offset)
-        task.wait(0.05) -- เร็วขึ้น
+        task.wait(0.05)
 
         local before = health.Value
-        for _ = 1, 5 do -- เพิ่มจำนวนการยิง
+        for _ = 1, 5 do
             remote:FireServer("Breath", "Destructibles", part)
             task.wait(ATTACK_DELAY)
         end
@@ -683,29 +732,32 @@ local function attackTarget(part)
             success = true
             break
         end
-        offset -= 3 -- ลดการเปลี่ยน offset
+
+        offset -= 3
     end
 
-    -- ยิงต่อเนื่องจนกว่า health จะเป็น 0
+    -- ฟาร์มจนกว่าจะฆ่าได้
     if success then
         while health.Value > 0 do
-            for _ = 1, 3 do -- ลดจำนวนการยิง
+            for _ = 1, 3 do
                 remote:FireServer("Breath", "Destructibles", part)
             end
-            
-            -- ดูดของระหว่างที่ยิง (แต่แบบค่อยๆ)
-            pullItemToPlayerSafely()
+
+            -- ดูดของแบบ async ไปพร้อมกับการยิง
+            task.spawn(pullItemToPlayerSafely)
+
             task.wait(ATTACK_DELAY)
         end
     end
 
-    -- จบแล้ววาร์ปกลับขึ้นมาจากใต้ดิน
+    -- กลับขึ้นมาจากใต้ดิน
     teleportTo(part, MAX_UNDERGROUND_OFFSET)
-    
-    -- ดูดของอีกครั้งหลังจากฟาร์มเสร็จ
+
+    -- ดูดของอีกครั้งหลังฟาร์มเสร็จ
     task.wait(0.2)
-    pullItemToPlayerSafely()
+    task.spawn(pullItemToPlayerSafely)
 end
+
 
 -- 🍎 ระบบดูดของแบบอัตโนมัติ (ค่อยๆ ดูด)
 task.spawn(function()
@@ -713,22 +765,28 @@ task.spawn(function()
         if isFarming and not collectingItems then
             pcall(pullItemToPlayerSafely)
         end
-        task.wait(2) -- ดูดทุก 2 วินาที (ช้าลงเพื่อความปลอดภัย)
+        task.wait(1.5) -- ดูดทุก 2 วินาที (ช้าลงเพื่อความปลอดภัย)
     end
 end)
 
 -- ✅ ใช้ Heartbeat ฟาร์มแบบเร็ว
 print("[⚡] เริ่มฟาร์ม LargeFoodNode แบบเทอร์โบ!")
 local lastFarmCheck = 0
+local lastScanCheck = 0
+local currentTarget = nil
 RunService.Heartbeat:Connect(function(dt)
     local now = tick()
-    if now - lastFarmCheck >= FARM_CHECK_DELAY then
-        lastFarmCheck = now
-        if not isFarming then return end -- ⛔ หากหยุดฟาร์มอยู่
-        
+
+    -- 🔍 สแกนต้นไม้ทุก 0.1 วิ
+    if now - lastScanCheck >= 0.1 then
+        lastScanCheck = now
+
         local foodFolder = workspace:FindFirstChild("Interactions")
             and workspace.Interactions:FindFirstChild("Nodes")
             and workspace.Interactions.Nodes:FindFirstChild("Food")
+
+        local found = false
+        currentTarget = nil
 
         if foodFolder then
             for _, node in ipairs(foodFolder:GetChildren()) do
@@ -736,15 +794,34 @@ RunService.Heartbeat:Connect(function(dt)
                     local part = node:FindFirstChild("BillboardPart")
                     local health = getHealth(part)
                     if part and health and health.Value > 0 then
-                        print("[⚡] ฟาร์มเทอร์โบ:", node:GetFullName())
-                        pcall(function() attackTarget(part) end)
+                        found = true
+                        currentTarget = part
                         break
                     end
                 end
             end
         end
+
+        -- ✅ อัปเดตข้อความ GUI
+        if _G.NoTreeWarningLabel then
+            _G.NoTreeWarningLabel.Visible = not found
+        end
+    end
+
+    -- 🔫 ฟาร์มต้นไม้เป้าหมายทุก 12 วิ
+    if now - lastFarmCheck >= 12 then
+        lastFarmCheck = now
+
+        if isFarming and currentTarget then
+            print("[🌳] เริ่มฟาร์ม:", currentTarget:GetFullName())
+            pcall(function()
+                attackTarget(currentTarget)
+            end)
+        end
     end
 end)
+
+
 
 -- ✅ สร้าง UI
 createModernUI()
